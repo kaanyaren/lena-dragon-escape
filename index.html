@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lena's Dragon Escape</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a0a2e;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      font-family: 'Courier New', monospace;
+    }
+    canvas {
+      border: 4px solid #4a2c7a;
+      image-rendering: pixelated;
+      box-shadow: 0 0 30px rgba(100, 50, 150, 0.5);
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 800;
+    canvas.height = 400;
+
+    const GAME = {
+      groundY: 350,
+      speed: 5,
+      score: 0,
+      highScore: parseInt(localStorage.getItem('lenaHighScore')) || 0,
+      state: 'title',
+      stars: []
+    };
+
+    const lena = {
+      x: 100,
+      y: 310,
+      width: 32,
+      height: 40,
+      velocityY: 0,
+      grounded: true,
+      frame: 0,
+      frameTimer: 0
+    };
+
+    const obstacles = [];
+    let obstacleTimer = 0;
+    const OBSTACLE_TYPES = ['dragon', 'flame', 'groundFlame'];
+
+    let gameStarted = false;
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    function playJumpSound() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    }
+
+    function playGameOverSound() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    }
+
+    for (let i = 0; i < 50; i++) {
+      GAME.stars.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * (GAME.groundY - 50),
+        size: Math.random() > 0.7 ? 2 : 1
+      });
+    }
+
+    function handleJump() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      
+      if (GAME.state === 'title') {
+        GAME.state = 'playing';
+        gameStarted = true;
+        return;
+      }
+      
+      if (lena.grounded && GAME.state === 'playing') {
+        lena.velocityY = -14;
+        lena.grounded = false;
+        playJumpSound();
+      } else if (GAME.state === 'gameover') {
+        resetGame();
+      }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handleJump();
+      }
+    });
+
+    canvas.addEventListener('click', handleJump);
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      handleJump();
+    });
+
+    const JUMP_FORCE = -14;
+    const GRAVITY = 0.7;
+
+    function updatePlayer() {
+      if (!lena.grounded) {
+        lena.velocityY += GRAVITY;
+        lena.y += lena.velocityY;
+        
+        if (lena.y >= GAME.groundY - 40) {
+          lena.y = GAME.groundY - 40;
+          lena.velocityY = 0;
+          lena.grounded = true;
+        }
+      }
+    }
+
+    function spawnObstacle() {
+      const type = OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)];
+      const obstacle = {
+        x: canvas.width + 50,
+        type: type,
+        frame: 0,
+        frameTimer: 0
+      };
+      
+      if (type === 'dragon') {
+        obstacle.y = GAME.groundY - 60 - Math.random() * 40;
+        obstacle.width = 48;
+        obstacle.height = 40;
+      } else if (type === 'flame') {
+        obstacle.y = GAME.groundY - 50 - Math.random() * 30;
+        obstacle.width = 24;
+        obstacle.height = 30;
+      } else {
+        obstacle.y = GAME.groundY - 25;
+        obstacle.width = 30;
+        obstacle.height = 25;
+      }
+      
+      obstacles.push(obstacle);
+    }
+
+    function updateObstacles() {
+      obstacleTimer++;
+      if (obstacleTimer > 90 - Math.min(GAME.speed * 2, 40)) {
+        obstacleTimer = 0;
+        spawnObstacle();
+      }
+      
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        obstacles[i].x -= GAME.speed;
+        
+        obstacles[i].frameTimer++;
+        if (obstacles[i].frameTimer > 6) {
+          obstacles[i].frameTimer = 0;
+          obstacles[i].frame = (obstacles[i].frame + 1) % 4;
+        }
+        
+        if (obstacles[i].x < -60) {
+          obstacles.splice(i, 1);
+        }
+      }
+    }
+
+    function checkCollisions() {
+      const hitbox = {
+        x: lena.x + 8,
+        y: lena.y + 8,
+        width: lena.width - 16,
+        height: lena.height - 8
+      };
+      
+      for (const obs of obstacles) {
+        const obsHitbox = {
+          x: obs.x + 4,
+          y: obs.y + 4,
+          width: obs.width - 8,
+          height: obs.height - 8
+        };
+        
+        if (hitbox.x < obsHitbox.x + obsHitbox.width &&
+            hitbox.x + hitbox.width > obsHitbox.x &&
+            hitbox.y < obsHitbox.y + obsHitbox.height &&
+            hitbox.y + hitbox.height > obsHitbox.y) {
+          gameOver();
+        }
+      }
+    }
+
+    function gameOver() {
+      GAME.state = 'gameover';
+      if (Math.floor(GAME.score / 10) > GAME.highScore) {
+        GAME.highScore = Math.floor(GAME.score / 10);
+        localStorage.setItem('lenaHighScore', GAME.highScore);
+      }
+      playGameOverSound();
+    }
+
+    function resetGame() {
+      GAME.score = 0;
+      GAME.speed = 5;
+      obstacles.length = 0;
+      lena.y = GAME.groundY - 40;
+      lena.velocityY = 0;
+      lena.grounded = true;
+      GAME.state = 'playing';
+    }
+
+    function update() {
+      if (GAME.state !== 'playing') return;
+      
+      GAME.score++;
+      GAME.speed = 5 + Math.floor(GAME.score / 500);
+      
+      updatePlayer();
+      updateObstacles();
+      checkCollisions();
+      
+      lena.frameTimer++;
+      if (lena.frameTimer > 8) {
+        lena.frameTimer = 0;
+        lena.frame = (lena.frame + 1) % 4;
+      }
+    }
+
+    function drawBackground() {
+      ctx.fillStyle = '#ffffff';
+      GAME.stars.forEach(star => {
+        const sx = (star.x - GAME.score / 50) % canvas.width;
+        ctx.fillRect(sx < 0 ? sx + canvas.width : sx, star.y, star.size, star.size);
+      });
+      
+      ctx.fillStyle = '#2a1a4a';
+      ctx.beginPath();
+      ctx.moveTo(0, GAME.groundY);
+      for (let x = 0; x <= canvas.width; x += 100) {
+        ctx.lineTo(x, GAME.groundY - 60 - Math.sin(x / 100) * 30);
+      }
+      ctx.lineTo(canvas.width, GAME.groundY);
+      ctx.fill();
+    }
+
+    function drawLena() {
+      ctx.fillStyle = '#00d4ff';
+      ctx.fillRect(lena.x, lena.y + 16, 32, 24);
+      
+      ctx.fillStyle = '#ffd4b8';
+      ctx.fillRect(lena.x + 8, lena.y, 16, 16);
+      
+      ctx.fillStyle = '#8b4513';
+      ctx.fillRect(lena.x + 6, lena.y - 4, 20, 8);
+      
+      ctx.fillStyle = '#ff69b4';
+      ctx.font = '8px monospace';
+      ctx.fillText('LENA', lena.x + 2, lena.y - 8);
+      
+      ctx.fillStyle = '#000';
+      ctx.fillRect(lena.x + 16, lena.y + 4, 2, 2);
+      ctx.fillRect(lena.x + 22, lena.y + 4, 2, 2);
+      
+      if (lena.grounded) {
+        const legOffset = lena.frame % 2 === 0 ? 0 : 4;
+        ctx.fillStyle = '#ffd4b8';
+        ctx.fillRect(lena.x + 8, lena.y + 40, 6, 8 - legOffset);
+        ctx.fillRect(lena.x + 18, lena.y + 40, 6, 4 + legOffset);
+      }
+    }
+
+    function drawObstacles() {
+      obstacles.forEach(obs => {
+        if (obs.type === 'dragon') {
+          ctx.fillStyle = '#ff4444';
+          ctx.fillRect(obs.x + 8, obs.y + 12, 32, 20);
+          
+          const wingY = obs.frame % 2 === 0 ? obs.y - 8 : obs.y;
+          ctx.fillStyle = '#ff6b6b';
+          ctx.fillRect(obs.x, wingY, 12, 16);
+          ctx.fillRect(obs.x + 36, wingY, 12, 16);
+          
+          ctx.fillStyle = '#ff4444';
+          ctx.fillRect(obs.x + 32, obs.y + 4, 16, 16);
+          
+          ctx.fillStyle = '#ffff00';
+          ctx.fillRect(obs.x + 40, obs.y + 8, 4, 4);
+          
+          ctx.fillStyle = '#ff8800';
+          ctx.fillRect(obs.x + 48, obs.y + 10, 8 + obs.frame * 2, 6);
+          
+        } else if (obs.type === 'flame') {
+          const flicker = obs.frame % 2 === 0 ? 0 : -4;
+          ctx.fillStyle = '#ff6600';
+          ctx.fillRect(obs.x + 4, obs.y + flicker, 16, 24);
+          ctx.fillStyle = '#ffcc00';
+          ctx.fillRect(obs.x + 8, obs.y + 4 + flicker, 8, 16);
+          
+          ctx.fillStyle = '#ffff00';
+          for (let p = 0; p < 3; p++) {
+            const px = obs.x + 4 + (obs.frame * 3 + p * 8) % 16;
+            const py = obs.y - 4 - ((obs.frame + p) % 4) * 3;
+            ctx.fillRect(px, py, 2, 2);
+          }
+          
+        } else {
+          ctx.fillStyle = '#ff4400';
+          ctx.fillRect(obs.x + 4, obs.y + 8, 22, 17);
+          ctx.fillStyle = '#ff8800';
+          ctx.fillRect(obs.x + 8, obs.y + 4, 14, 12);
+          ctx.fillStyle = '#ffcc00';
+          ctx.fillRect(obs.x + 10, obs.y, 10, 8);
+          
+          ctx.fillStyle = '#ffff00';
+          for (let p = 0; p < 4; p++) {
+            const sx = obs.x + ((obs.frame * 2 + p * 7) % 26);
+            const sy = obs.y - 4 - ((obs.frame + p * 2) % 6) * 2;
+            ctx.fillRect(sx, sy, 2, 2);
+          }
+        }
+      });
+    }
+
+    function drawGame() {
+      const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+      gradient.addColorStop(0, '#1a0a2e');
+      gradient.addColorStop(1, '#2d1b4e');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      drawBackground();
+      
+      ctx.fillStyle = '#3d2266';
+      ctx.fillRect(0, GAME.groundY, canvas.width, 50);
+      ctx.fillStyle = '#4a2c7a';
+      ctx.fillRect(0, GAME.groundY, canvas.width, 4);
+      
+      drawLena();
+      drawObstacles();
+      
+      ctx.fillStyle = '#fff';
+      ctx.font = '20px monospace';
+      ctx.fillText(`SCORE: ${Math.floor(GAME.score / 10)}`, 20, 30);
+      ctx.fillText(`HI: ${GAME.highScore}`, 20, 55);
+    }
+
+    function drawGameOver() {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      ctx.fillStyle = '#ff4444';
+      ctx.font = '48px monospace';
+      ctx.fillText('GAME OVER', 250, 150);
+      
+      ctx.fillStyle = '#ff4444';
+      ctx.fillRect(lena.x + 8, lena.y + 12, 32, 20);
+      ctx.fillRect(lena.x + 32, lena.y + 4, 16, 16);
+      ctx.fillStyle = '#ffff00';
+      ctx.fillRect(lena.x + 40, lena.y + 8, 4, 4);
+      
+      ctx.fillStyle = '#fff';
+      ctx.font = '24px monospace';
+      ctx.fillText(`Score: ${Math.floor(GAME.score / 10)}`, 300, 220);
+      ctx.fillText(`High Score: ${GAME.highScore}`, 270, 260);
+      
+      ctx.fillStyle = '#00d4ff';
+      ctx.font = '20px monospace';
+      ctx.fillText('Press SPACE or Click to Play Again', 180, 320);
+    }
+
+    function drawTitleScreen() {
+      const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+      gradient.addColorStop(0, '#1a0a2e');
+      gradient.addColorStop(1, '#2d1b4e');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      drawBackground();
+      
+      ctx.fillStyle = '#00d4ff';
+      ctx.font = '48px monospace';
+      ctx.fillText("LENA'S", 300, 140);
+      ctx.fillStyle = '#ff69b4';
+      ctx.fillText('DRAGON', 290, 190);
+      ctx.fillStyle = '#ff4444';
+      ctx.fillText('ESCAPE', 310, 240);
+      
+      ctx.fillStyle = '#fff';
+      ctx.font = '20px monospace';
+      ctx.fillText('Press SPACE or Click to Start', 220, 320);
+      
+      ctx.font = '14px monospace';
+      ctx.fillStyle = '#888';
+      ctx.fillText('Jump over dragons and flames!', 270, 360);
+    }
+
+    function draw() {
+      if (GAME.state === 'title') {
+        drawTitleScreen();
+      } else if (GAME.state === 'playing') {
+        drawGame();
+      } else if (GAME.state === 'gameover') {
+        drawGame();
+        drawGameOver();
+      }
+    }
+
+    function gameLoop() {
+      update();
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+
+    gameLoop();
+  </script>
+</body>
+</html>
